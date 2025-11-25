@@ -1,0 +1,8 @@
+FROM postgres:16
+
+# Install build dependencies (optional, if needed for other extensions)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*

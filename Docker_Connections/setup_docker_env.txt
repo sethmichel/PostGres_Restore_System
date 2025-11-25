@@ -1,0 +1,89 @@
+1) get docker compose & make a env file for each container, and a yml file for docker
+
+2) in the docker folder with the env and yml files: docker compose up -d
+
+3) go to localhost:8080 and login
+
+4) make the pg servers there
+
+misc commands
+list running containers           docker ps
+
+enter a containers shell          docker exec -it <host name> bash
+
+start psql only if username and   psql -U <username>
+db name are the same  
+
+start psql only if username and   psql -U <username> -d <db name>
+db name are different
+
+now we'll see "<username>=#"
+if we see "<username>-#" it means it's waiting for you to finish a multi line query. so you probably forgot 
+the ";"
+                                
+quit                        \q
+switch db's                 \c <db name>
+exit root                   exit
+
+This is where pg writes WAL (shared memory (buffer))  pg_waldump /var/lib/postgresql/data/pg_wal
+
+
+
+
+note about how the ports work
+- the yml files have host_port (localhost):container_port. so 5434:5432 means
+        pg inside the container runs on 5432, docker forwards localhost:5434 on my machine to port 5432 in the 
+        container
+  the env files port should be what the containers use. the pg servers should use 5432 when I make them
+
+- when containers talk to each other, they use the internal port 5432
+- When python code connects from the host, it should use: 5434 for pg_primary, 5435 for pg_standby, 5436 for 
+  pg_sink
+
+
+trouble shooting
+- see port notes, that can cause a lot of weird issues like password rejected
+
+**YOU AREN'T GETTING WAL DATA**
+2) check you have replication slots for your code and standby. should have subscription, wal reader (python). type = logical, actrive = t for sub and f for wal reader if the code isn't running
+   the plugin for the code should be wal2json
+primary: SELECT * FROM pg_replication_slots;    OR 
+         SELECT slot_name, active, plugin, confirmed_flush_lsn FROM pg_replication_slots;
+
+3) check wal2json is installed, and is active in the containers
+*my version of pg doens't have functions to check this anymore
+- Check if the wal2json .so file is physically present:
+        ls /usr/lib/postgresql/*/lib/wal2json.so
+
+- docker file should install wal2json and you were supposed to have made the containers by these since the old image might have no wal2json
+        docker compose down -v
+        docker build --no-cache
+
+- in primary: SHOW wal_level;
+        should be "logical"
+
+- run this and if it prints "(wal2json_test,0/153A1A8)" you're good. Then delete the extra slot you just made
+        - SELECT pg_create_logical_replication_slot('wal2json_test', 'wal2json');
+        - SELECT pg_drop_replication_slot('slot_name');
+
+- check container logs for plugin loading errors
+
+- run this test
+        - insert some data
+        - SELECT * FROM pg_logical_slot_get_changes('wal2json_test', NULL, NULL);
+        - you should see json like: {"change":[{"kind":"insert","schema":"public","table":"some_table","columnnames":["id","value"],"columnvalues":[1,"hello"]}]}
+
+
+4) you're starting at lsn x. see if that's the end or if there's nothing between there and the end or if it's beyond the end for some
+   reason. however, if we don't have a lsn saved, then it's likely going to get the final lsn value which has no wal changes after it. 
+   so we'd have to submit changes after getting that lsn or start from a farther back lsn. if we start from a farther back lsn then 
+   we'll get duplicate data
+        - get newest lsn from the table: SELECT * FROM Lsn_Offsets WHERE slot_name = 'slot_wal_reader';
+        - get current wal position: SELECT pg_current_wal_lsn();   # 0/1564E30
+        - Check if there's WAL data between your last position and current position: SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '<position>');
+        - app.env can use start_from_beginning=true because the sink ignores duplicate primary keys. this alone might fix it at least
+          until I start saving lsn id's to teh table
+
+5) stderr might have error info
+        - "no target file specified": probably missing the path to pg_recvlogical.exe. that file directory (not the file itself) 
+        should be in your system path
