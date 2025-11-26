@@ -6,80 +6,76 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 
 	"pg_restore/config"
 	"pg_restore/sql_commands"
+	"pg_restore/wal_manager"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// return a dsn string
-func MakeDsn(pg *config.PgConnInfo) string {
-	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
-		pg.Host, pg.Port, pg.User, pg.Password, pg.DbName)
+
+// loads env file data
+func LoadAllConfigs() (*config.PgConnInfo, *config.PgConnInfo, *config.PgConnInfo, *config.AppConfig) {
+	primaryConfig, err := config.LoadDockerEnvConfig("Primary.env")
+	if err != nil {
+		log.Fatalf("Failed to load Primary config: %v", err)
+	}
+
+	standbyConfig, err := config.LoadDockerEnvConfig("Standby.env")
+	if err != nil {
+		log.Fatalf("Failed to load Standby config: %v", err)
+	}
+
+	walCaptureConfig, err := config.LoadDockerEnvConfig("wal_capture_service.env")
+	if err != nil {
+		log.Fatalf("Failed to load Sink/WalCapture config: %v", err)
+	}
+
+	appConfig, err := config.LoadAppEnvConfig("app.env", primaryConfig)
+	if err != nil {
+		log.Fatalf("Failed to load App config: %v", err)
+	}
+
+	return primaryConfig, standbyConfig, walCaptureConfig, appConfig
 }
 
-// CreateTestDataTableSql returns the SQL to create the test table
-func CreateTestDataTableSql() string {
-	return sql_commands.Create_Test_Data_Table()
+
+// do various startup checks
+func PerformStartupChecks(primary_config *config.PgConnInfo, standby_config *config.PgConnInfo, wal_captureer_config *config.PgConnInfo, app_config *config.AppConfig) {
+	// 1. check files and dir's are present
+	CheckDirsFiles()
+	// DEBUG
+	fmt.Printf("Loaded Configs. Primary Host: %s:%d\n", primary_config.Host, primary_config.Port)
+
+	// 2. Database Tables (Test Data)
+	CheckTestDataTable(primary_config.Dsn, "primary")  // Database Tables 
+	CheckTestDataTable(standby_config.Dsn, "standby")  // Database Tables 
+	CheckMetaDataTable(primary_config.Dsn)             // wal metadata table
+
+	// 3. plysical replication slots
+	CheckPhysicalReplicationSlots(primary_config.Dsn)
+
+	fmt.Println("All Startup Checks Complete.")
 }
 
-// CheckTestDataTable creates test data table on primary/standbys
-func CheckTestDataTable(dsn string, serverName string) {
-	ctx := context.Background()
-	conn, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		log.Printf("Failed to connect to %s database: %v", serverName, err)
-		return
-	}
-	defer conn.Close(ctx)
 
-	sqlCommand := CreateTestDataTableSql()
-
-	// Create table
-	_, err = conn.Exec(ctx, sqlCommand)
-	if err != nil {
-		log.Printf("Error creating test_data table on %s: %v", serverName, err)
-		return
-	}
-
-	// Check if row exists
-	var count int
-	err = conn.QueryRow(ctx, "SELECT COUNT(*) FROM test_data").Scan(&count)
-	if err != nil {
-		log.Printf("Error counting rows on %s: %v", serverName, err)
-		return
-	}
-
-	if count == 0 {
-		_, err = conn.Exec(ctx, "INSERT INTO test_data (counter, message, value) VALUES (0, 'Initial row', 0.00)")
-		if err != nil {
-			log.Printf("Error inserting initial row on %s: %v", serverName, err)
-		} else {
-			fmt.Printf("test_data table created on %s with initial row\n", serverName)
-		}
-	} else {
-		fmt.Printf("test_data table ready on %s\n", serverName)
-	}
-}
-
-// CheckDockerConnections verifies required files exist
-func CheckDockerConnections() {
+func CheckDirsFiles() {
 	dockerDir := "Docker_Connections"
 
-	// Check if folder exists
-	if _, err := os.Stat(dockerDir); os.IsNotExist(err) {
-		err := os.Mkdir(dockerDir, 0755)
-		if err != nil {
+	// check if dir exists
+	_, err := os.Stat(dockerDir)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(dockerDir, 0755); err != nil {
 			log.Fatalf("Error creating Docker_Connections folder: %v", err)
 		}
 		fmt.Printf("Created Docker_Connections folder at %s\n", dockerDir)
 		return
 	}
 
-	// Check for required files
-	requiredFiles := []string{"docker-compose.yml", "Primary.env", "Standby.env"}
+	// check for required files
+	requiredFiles := []string{"docker-compose.yml", "Primary.env", "Standby.env", "Restore_Runner.env", "Wal_Capture_Service.env", "Dockerfile.postgres"}
 	var missingFiles []string
 
 	for _, file := range requiredFiles {
@@ -97,68 +93,91 @@ func CheckDockerConnections() {
 		os.Exit(1)
 	}
 
-	// Check if app.env exists
 	if _, err := os.Stat("app.env"); os.IsNotExist(err) {
 		fmt.Println("Error: app.env is missing")
 		os.Exit(1)
 	}
 }
 
+
+func CheckTestDataTable(dsn string, serverName string) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		log.Printf("Failed to connect to %s database: %v", serverName, err)
+		return
+	}
+	defer conn.Close(ctx)
+
+	sqlCommand := sql_commands.Create_Test_Data_Table()
+	if _, err = conn.Exec(ctx, sqlCommand); err != nil {
+		log.Printf("Error creating test_data table on %s: %v", serverName, err)
+	}
+}
+
+
+func CheckMetaDataTable(dsn string) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		log.Printf("Failed to connect to Primary for metadata check: %v", err)
+		return
+	}
+	defer conn.Close(ctx)
+
+	sqlCommand := sql_commands.Create_Wal_Metadata_Table()
+	if _, err := conn.Exec(ctx, sqlCommand); err != nil {
+		log.Fatalf("Error creating wal_metadata table: %v", err)
+	}
+	fmt.Println("Checked/Created wal_metadata table on Primary.")
+}
+
+func CheckPhysicalReplicationSlots(dsn string) {
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		log.Printf("Failed to connect to primary for slot check: %v", err)
+		return
+	}
+	defer conn.Close(ctx)
+
+	var count int
+	err = conn.QueryRow(ctx, "SELECT count(*) FROM pg_replication_slots WHERE slot_type = 'physical' AND active = true").Scan(&count)
+	if err != nil {
+		log.Printf("Error checking replication slots: %v", err)
+		return
+	}
+
+	if count == 2 {
+		fmt.Printf("Success: Primary has %d active physical replication slots.\n", count)
+	} else {
+		fmt.Printf("Warning: Primary has %d active physical replication slots (expected 2).\n", count)
+	}
+}
+
+
 func main() {
-	// 1. Check folders and files
-	CheckDockerConnections()
+	// 1 load configs
+	primaryConfig, standbyConfig, walCaptureConfig, appConfig := LoadAllConfigs()
 
-	// 2. Load env files
-	primaryConfig, err := config.LoadDockerEnvConfig("Primary.env")
-	if err != nil {
-		log.Fatalf("Failed to load Primary config: %v", err)
+	// 2 run system checks
+	PerformStartupChecks(primaryConfig, standbyConfig, walCaptureConfig, appConfig)
+
+	// 3. Start WAL Manager (Continuous Monitoring)
+	walArchiveDir := filepath.Join("Docker_Connections", "wal_archive")
+	if _, err := os.Stat(walArchiveDir); os.IsNotExist(err) {
+		os.MkdirAll(walArchiveDir, 0755)
 	}
 
-	standbyConfig, err := config.LoadDockerEnvConfig("Standby.env")
+	// MAIN DATA LOOP
+	
+	// Initialize Manager
+	wal_manager, err := wal_manager.NewWalManager(walArchiveDir, primaryConfig.Dsn)
 	if err != nil {
-		log.Fatalf("Failed to load Standby config: %v", err)
+		log.Fatalf("Failed to initialize WAL Manager: %v", err)
 	}
+	defer wal_manager.Close()
 
-	// Using wal_capture_service.env as the Sink replacement based on ports
-	sinkConfig, err := config.LoadDockerEnvConfig("wal_capture_service.env")
-	if err != nil {
-		log.Fatalf("Failed to load Sink/WalCapture config: %v", err)
-	}
-
-	appConfig, err := config.LoadAppEnvConfig("app.env", primaryConfig)
-	if err != nil {
-		log.Fatalf("Failed to load App config: %v", err)
-	}
-
-	// 3. Make DSN strings
-	primaryDsn := MakeDsn(primaryConfig)
-	standbyDsn := MakeDsn(standbyConfig)
-	sinkDsn := MakeDsn(sinkConfig)
-
-	// Debug output to verify
-	fmt.Printf("Loaded Configs. Primary Host: %s:%d\n", primaryConfig.Host, primaryConfig.Port)
-	fmt.Printf("App Config: Publication=%s, Slot=%s\n", appConfig.PublicationName, appConfig.SlotName)
-	fmt.Printf("Sink DSN: %s\n", sinkDsn)
-
-	// 4. Check database tables
-	// We add a small sleep to ensure containers are ready if we just started them (optional)
-	time.Sleep(500 * time.Millisecond)
-
-	CheckTestDataTable(primaryDsn, "primary")
-	CheckTestDataTable(standbyDsn, "standby")
-
-	// Placeholder for sink table check if needed
-	// CheckTestDataTable(sinkDsn, "sink")
-
-	fmt.Println("Startup checks complete.")
-
-	/*
-		// Future Implementation from Python lines 205+:
-		Create_Cdc_Table(sink_dsn)
-		Get_Lsn_Table_Conn(app_config.offsets_path)
-		Check_Publication(primary_dsn, app_config.publication_name)
-		Check_Subscription(standby_dsn, primary_config, app_config)
-		Check_Replication_Slot(primary_dsn, app_config.slot_name, app_config.plugin)
-		...
-	*/
+	// Run the loop (blocking)
+	wal_manager.RunMonitor(5 * time.Second)
 }

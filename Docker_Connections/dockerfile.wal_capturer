@@ -3,10 +3,10 @@ FROM postgres:16
 WORKDIR /wal_capturer
 
 # Create directory where WAL segments will be saved
-RUN mkdir -p /wal_archive
+RUN mkdir -p /Wal_Archive
 
 # Set entrypoint script
-COPY run_wal_capturer.sh /run_wal_capturer.sh
-RUN chmod +x /run_wal_capturer.sh
+COPY Run_Wal_Capturer.sh /Run_Wal_Capturer.sh
+RUN chmod +x /Run_Wal_Capturer.sh
 
-ENTRYPOINT ["/run_wal_capturer.sh"]
+ENTRYPOINT ["/Run_Wal_Capturer.sh"]

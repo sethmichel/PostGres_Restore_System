@@ -17,15 +17,14 @@ type PgConnInfo struct {
 	User     string
 	Password string
 	DbName   string
+	Dsn      string
 }
 
 // AppConfig holds application settings
 type AppConfig struct {
 	Primary               *PgConnInfo
-	PublicationName       string
-	SubscriptionName      string
 	SlotName              string
-	Plugin                string  // pgoutput or wal2json
+	Plugin                string // pgoutput or wal2json
 	StartFromBeginning    bool
 	BatchSize             int
 	MaxRetries            int
@@ -33,6 +32,13 @@ type AppConfig struct {
 	StatusIntervalSeconds float64
 	OffsetsPath           string
 }
+
+
+func MakeDsn(pg *PgConnInfo) string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
+		pg.Host, pg.Port, pg.User, pg.Password, pg.DbName)
+}
+
 
 // loads database connection info from the .env files
 func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
@@ -45,16 +51,14 @@ func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
 	}
 
 	// port mapping: host port : container port
-	portMapping := map[string]int {
+	portMapping := map[string]int{
 		"Primary.env":             5434,
-		"primary.env":             5434,
 		"Standby.env":             5435,
-		"standby.env":             5435,
-		"wal_capture_service.env": 5436,
-		"restore_runner.env":      5437,
+		"Wal_Capture_Service.env": 5436,
+		"Restore_Runner.env":      5437,
 	}
 
-	hostPort, ok := portMapping[envFile]  // ok is a bool telling me if the key exists in the map
+	hostPort, ok := portMapping[envFile] // ok is a bool telling me if the key exists in the map
 	if !ok {
 		// fallback to env file if not in map
 		p, err := strconv.Atoi(os.Getenv("POSTGRES_PORT"))
@@ -64,7 +68,7 @@ func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
 		hostPort = p
 	}
 
-	connInfo := &PgConnInfo {
+	connInfo := &PgConnInfo{
 		Host:     "localhost",
 		HostName: os.Getenv("HOST_NAME"),
 		Port:     hostPort,
@@ -72,6 +76,7 @@ func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
 		Password: os.Getenv("POSTGRES_PASSWORD"),
 		DbName:   os.Getenv("POSTGRES_DB"),
 	}
+	connInfo.Dsn = MakeDsn(connInfo)
 
 	if connInfo.HostName == "" || connInfo.User == "" || connInfo.Password == "" || connInfo.DbName == "" {
 		return nil, fmt.Errorf("missing environment variables in file: %s", envFile)
@@ -79,7 +84,6 @@ func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
 
 	return connInfo, nil
 }
-
 
 // load app env file
 func LoadAppEnvConfig(envFile string, primaryConfig *PgConnInfo) (*AppConfig, error) {
@@ -96,8 +100,6 @@ func LoadAppEnvConfig(envFile string, primaryConfig *PgConnInfo) (*AppConfig, er
 
 	appInfo := &AppConfig{
 		Primary:               primaryConfig,
-		PublicationName:       os.Getenv("publication_name"),
-		SubscriptionName:      os.Getenv("subscription_name"),
 		SlotName:              os.Getenv("slot_name"),
 		Plugin:                os.Getenv("plugin"),
 		StartFromBeginning:    startFromBeginning,
@@ -106,10 +108,6 @@ func LoadAppEnvConfig(envFile string, primaryConfig *PgConnInfo) (*AppConfig, er
 		BackoffSeconds:        backoffSeconds,
 		StatusIntervalSeconds: statusInterval,
 		OffsetsPath:           os.Getenv("offsets_path"),
-	}
-
-	if appInfo.PublicationName == "" || appInfo.SlotName == "" {
-		return nil, fmt.Errorf("missing required config variables in %s", envFile)
 	}
 
 	return appInfo, nil
