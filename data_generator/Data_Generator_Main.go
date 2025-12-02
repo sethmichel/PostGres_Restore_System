@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func Generation_Loop() {
+func main() {
 	// Seed the random number generator
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Load Primary config
-	// Assumes running from project root so it can find "Docker_Connections"
+	// Config loader will look in current or parent directory for "Docker_Connections"
 	primaryConfig, err := config.LoadDockerEnvConfig("Primary.env")
 	if err != nil {
 		log.Fatalf("Failed to load Primary config: %v", err)

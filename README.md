@@ -242,7 +242,9 @@ after it's done add this test
 
 
 **Required private local files not in this repo**
-- primary, standby, app env files, which are the config files
+- primary, standby, app, restore_runner, wal_capture_service env files, which are the config files
 - servers.json which has the info to make the pg servers
+- docker-compose.yml file
+- docker_connections/wal_archive/ directory
 
 

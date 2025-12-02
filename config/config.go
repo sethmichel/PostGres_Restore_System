@@ -33,16 +33,23 @@ type AppConfig struct {
 	OffsetsPath           string
 }
 
-
 func MakeDsn(pg *PgConnInfo) string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s",
 		pg.Host, pg.Port, pg.User, pg.Password, pg.DbName)
 }
 
-
 // loads database connection info from the .env files
+// this is also called from the data generator which messes up the directory. so we make sure everythings right first
 func LoadDockerEnvConfig(envFile string) (*PgConnInfo, error) {
+	// Try to find Docker_Connections in current or parent directory
 	envPath := filepath.Join("Docker_Connections", envFile)
+	if _, err := os.Stat(envPath); os.IsNotExist(err) {
+		// Try parent directory
+		parentPath := filepath.Join("..", "Docker_Connections", envFile)
+		if _, err := os.Stat(parentPath); err == nil {
+			envPath = parentPath
+		}
+	}
 
 	// overload: load in data and overwrite existing data
 	err := godotenv.Overload(envPath)

@@ -24,6 +24,7 @@ go run .  // runs main.go
 - go contexts
 - go recievers (when we write a type before the function name (wal_manager.go))
 - go channels
+- go build requires the package & function to be named main
 
 
 **bugs**
