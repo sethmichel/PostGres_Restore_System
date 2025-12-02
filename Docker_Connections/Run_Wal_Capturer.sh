@@ -2,11 +2,19 @@
 set -e
 
 # Configuration from environment variables
+# Load from Primary.env if variables are missing (useful for local testing or if env not passed)
+if [ -z "$PG_HOST" ] && [ -f "Primary.env" ]; then
+  echo "Loading environment from Primary.env..."
+  set -a
+  source Primary.env
+  set +a
+fi
+
 PG_HOST="${PG_HOST:-$HOST_NAME}"
 PG_PORT="${PG_PORT:-${POSTGRES_PORT:-5432}}"
 PG_USER="${PG_USER:-$POSTGRES_USER}"
 PG_PASSWORD="${PG_PASSWORD:-$POSTGRES_PASSWORD}"
-SLOT_NAME="${SLOT_NAME}"
+SLOT_NAME="${SLOT_NAME:-pitr_slot}"
 ARCHIVE_DIR="${ARCHIVE_DIR:-/wal_archive}"
 
 # Check for required variables
@@ -30,15 +38,18 @@ echo "PostgreSQL primary is ready."
 echo "Starting WAL capture to $ARCHIVE_DIR..."
 
 # Run pg_receivewal
-# --create-slot: Ensures the slot exists before starting
-# --if-not-exists: Prevents error if slot already exists
-# -v: Verbose output so you can see what it's doing in docker logs
+# We remove --create-slot and --if-not-exists from the main execution loop
+# because if the slot exists, --create-slot might fail even with --if-not-exists in some versions/contexts,
+# or more likely, we want to be explicit.
+
+# First, try to create the slot. If it fails, we assume it exists.
+pg_receivewal -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" --slot="$SLOT_NAME" --create-slot --if-not-exists || true
+
+# Now run the receive loop
 exec pg_receivewal \
   -h "$PG_HOST" \
   -p "$PG_PORT" \
   -U "$PG_USER" \
   -D "$ARCHIVE_DIR" \
   --slot="$SLOT_NAME" \
-  --create-slot \
-  --if-not-exists \
   -v

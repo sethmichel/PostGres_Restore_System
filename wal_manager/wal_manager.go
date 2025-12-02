@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"pg_restore/sql_commands"
 	"strconv"
 	"strings"
 	"time"
-	"pg_restore/Sql_Commands"
 
 	"github.com/jackc/pgx/v5"
 )
-
 
 // WalManager handles scanning and cataloging WAL files
 type WalManager struct {
@@ -20,9 +19,8 @@ type WalManager struct {
 	DbConn     *pgx.Conn
 }
 
-
-// creates a new manager
-// Assumes metadata table already exists
+// creates & return a new manager
+// connects to primary
 func NewWalManager(archiveDir string, dsn string) (*WalManager, error) {
 	ctx := context.Background()
 	conn, err := pgx.Connect(ctx, dsn)
@@ -36,14 +34,12 @@ func NewWalManager(archiveDir string, dsn string) (*WalManager, error) {
 	}, nil
 }
 
-
 // Close closes the db connection
 func (wm *WalManager) Close() {
 	if wm.DbConn != nil {
 		wm.DbConn.Close(context.Background())
 	}
 }
-
 
 // extracts info from the filename
 // Standard WAL file: 8 chars timeline + 16 chars segment = 24 chars
@@ -72,7 +68,6 @@ func ParseWalFilename(filename string) (int, string, bool) {
 
 	return int(timeline), segmentHex, true
 }
-
 
 // scans the directory and updates the metadata table
 // Returns number of new/updated files
@@ -115,11 +110,11 @@ func (wm *WalManager) SyncWalFiles() (int, error) {
 		// Upsert into DB
 		query := sql_commands.Update_Wal_MetaData_Table()
 
-		cmdTag, err := wm.DbConn.Exec(ctx, query, cleanName, timeline, segment, isPartial, size)
+		result, err := wm.DbConn.Exec(ctx, query, cleanName, timeline, segment, isPartial, size)
 		if err != nil {
 			log.Printf("Failed to upsert WAL metadata for %s: %v", name, err)
 		} else {
-			if cmdTag.RowsAffected() > 0 {
+			if result.RowsAffected() > 0 {
 				updatedCount++
 			}
 		}
@@ -127,7 +122,6 @@ func (wm *WalManager) SyncWalFiles() (int, error) {
 
 	return updatedCount, nil
 }
-
 
 // starts a ticker for every x seconds. it's not a stopwatch, it's a signal sender
 func (wm *WalManager) RunMonitor(interval time.Duration) {
@@ -138,7 +132,7 @@ func (wm *WalManager) RunMonitor(interval time.Duration) {
 
 	// ticker.C is the channel the ticker uses to send the signal
 	// this means this is an infinite loop with a delay (iterval)
-	for range ticker.C {  
+	for range ticker.C {
 		count, err := wm.SyncWalFiles()
 		if err != nil {
 			log.Printf("Error syncing WAL files: %v", err)
@@ -147,4 +141,3 @@ func (wm *WalManager) RunMonitor(interval time.Duration) {
 		}
 	}
 }
-
