@@ -1,11 +1,3 @@
-**AI Commands**
-Rules
-- use 2 newlines between functions
-- write variabels in lowercase snake case
-- write functions and files in snake case with the first letter of each word capitalized
-- when you write a function, don't write the function name in the comments for that function
----------------------
-
 primary: data is written here. contains test data table and wal metadata table
 standby: for demonstration purposes. has test data table
 

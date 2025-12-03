@@ -11,6 +11,7 @@ password_issue.txt
 pg_restore.exe
 go.mod
 go.sum
+ai_rules.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

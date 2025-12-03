@@ -1,3 +1,13 @@
+***TODO***
+- test backup process
+- test the restore process
+- might have bugs around the pg server in restore_target
+- make sure restore_target auto makes a pg server like primary does
+Later
+	- restore to a timestamp
+	- restore to a lsn
+
+
 **vocab**
 - "cluster": a single pg insteance + the db it managers + all its internal files. so pgdata, wal files, system stuff, all db's in it, config files, tables, indexes... so it's 1 pg server instance
 
