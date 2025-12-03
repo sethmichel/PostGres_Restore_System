@@ -7,6 +7,7 @@ RUN mkdir -p /Wal_Archive
 
 # Set entrypoint script
 COPY Run_Wal_Capturer.sh /Run_Wal_Capturer.sh
+RUN sed -i 's/\r$//' /Run_Wal_Capturer.sh
 RUN chmod +x /Run_Wal_Capturer.sh
 
 ENTRYPOINT ["/Run_Wal_Capturer.sh"]

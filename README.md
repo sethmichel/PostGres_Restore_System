@@ -1,3 +1,11 @@
+**AI Commands**
+Rules
+- use 2 newlines between functions
+- write variabels in lowercase snake case
+- write functions and files in snake case with the first letter of each word capitalized
+- when you write a function, don't write the function name in the comments for that function
+---------------------
+
 primary: data is written here. contains test data table and wal metadata table
 standby: for demonstration purposes. has test data table
 
@@ -5,22 +13,31 @@ basic setup overview:
 - primary and standby are pg servers. they have a test data table, and primary has a metadata table
 - wal_capture container auto runs an sh script which pulls raw wal data and puts it in /wal_archive
 - this program reads /wal_archive and updates metadata table
+- postgres writes wal data into a fixed size segment that's 16mb or something, so it keeps writting to that until we run out of space. so it's 1 .partial file during that process. .partial means the file is currently being written to. it's removed when teh segment is full and starts a new one
+	- this presents a design decision. how do we get data from a file constantly being written to? what do we do with it?
+		- for restores, we'll copy the 1 .partial file to a temp location, rename it, and use that. that's a "snapshot" of the db at a point in time.
+		- when a file stops being .partial, we can then add its data to the metadata table
 
+**What I've done so far**
+Other processes
+	- when docker starts, the wal_capture container will start which will trigger the run_wal_capturer.sh to run. this file pulls raw wal data so long as the container is up and ends up putting it in /wal_archive
+	- data generator can run separatly and put data in primary test_data
 
-What I've done so far
-- when docker starts, the wal_capture container will start which will trigger the run_wal_capturer.sh to run. this file pulls raw wal data so long as the container is up and ends up putting it in /wal_archive
+main_process
 - load configs
 - check files/dirs are setup 
 - check db tables exist on primary, standby, and wal metadata table on primary
 - check there's 2 physical replication slots active on primary
-- create a wal manager object housing the db connection to primary. the subprocess then runs every 5 seconds
+- create a wal manager object housing the db connection to primary. the process then runs every 5 seconds
 	- scans the wal_archive dir for new files that are done loading. updates the metadata table with any new info
 
-**It seems at this stage I have the startup and metadata table updating done
-**next steps: 
-	- write a script to add test data every 1 second to primary so we have new wal logs to read
-		- the wal_manager should see the files being written to /wal_archive
 
+**TODO:**
+- wal_manager basically updates the metadata table with the partial file size, and then we don't really need to extract any data from it, just the files various status. to do this 
+	- wal_manager updates the db with the new .partial file size each loop. we don't copy the file for this
+	- to restore, we take 1 snapshot of the .partial file at that moment. a snapshot is a copy of the file with .partial removed, since it's being written to it might tear at the end but that's ideal because it just makes pg stop there. we feed this to the restore engine. then we delete that copy
+
+- possible bug: it's assuming Standard WAL file: 8 chars timeline + 16 chars segment = 24 chars. it might have problems dealing with .partial files. debug needed
 
 
 
@@ -36,55 +53,92 @@ how data is pulled from primary
 
 
 - the system produces base snapshots (pg_basebackup), captures physical wal segments, stores them somewhere, restores them by replaying wal into a restore target
-- primary
+
+Containers
+- primary container
 	- pg server
 	- WAL archiving enabled
-	- Will have a physical replication slot
-	- Will be used by pg_basebackup
-	- Will stream full WAL segments
+	- has 2 physical replication slots (1 for pg_basebackup, 1 for the standby)
 	- this is not a publisher
 
-- standby
+- standby container
 	- pg server
 	- Follows primary using physical streaming
-	- Helps you test timelines and failover
+	- Helps test timelines and failover
 	- Useful for verifying restore correctness
 	- this is not a subscriber (that would be logical replication). it's a hot standby which uses physical streaming replication
-	- pg_basebackup intializes the standby
 
-- wal capture service
-	- not a pg server, it's a go script doing wal capture
+- pgadmin container
+	- just for viewing the pg servers
 
-- restore_runner
-	- should not run pg until the restore time
-	- this is a container only brough up during restore time
+- restore target container
+	- container is alive all the time, and has a pg server, but it's doing nothing until we restore
+	- on restore, we're writing the wal data to this pg server in recovery mode. 
+	- once done it promotes from recovery mode to normal mode - it's now a normal pg server
 
-- backup/restore
-	- You bring this up only when doing a restore
-	- You stop it, wipe its data dir, run restore, replay WAL
-	- Never needs replication slots (it doesn’t subscribe to anything)
+- wal capturer container
+	- it's a go script doing wal capture on primary and sending the data to my program
 
-I need 2 physical replciation slots. 1 for pg_basebackup, 1 for the standby
+I need 2 physical replciation slots. 
 	- inside primary: SELECT * FROM pg_create_physical_replication_slot('pitr_slot');
 	- my code will run: pg_receivewal -h localhost -p 5434 -D /wal_archive -U replication_user --slot=pitr_slot
 		- this continuously pulls wal segments
 
-there's no decodeing (no wal2json), we use pg_receivewal. pg_receivewal = “download raw WAL segments continuously”
+files
+- data_generator.go
+	- generates random data to the primary test_data table every 1 second. this is so we have wal data
+	- run this alongside the main program
 
-my backup script runs stuff like
-pg_basebackup -h localhost -p 5434 \
-  -U replication_user \
-  -D base_backups/base_2025_11_25 \
-  -X stream \
-  -C --slot=pitr_slot
+- run_wal_captureer.sh
+	- auto called when teh wal_capturer container is running. this is what gets the data to the program
 
-then I restore
-- Stop restore target container
-- Wipe its data dir
-- Copy base backup into it
-- Add recovery.signal
-- Point restore_command to archived WALs
-- Start container → PostgreSQL replays WAL until target LSN/time
+- rebuild_og_servers.sh
+	- nukes containers, deletes volumes, builds containers, launches containers (this also causes the pg servers to be created). run this and everything should be refreshed and usable 
+
+- sql_commands.go
+	- houes all the larger sql commands, just so they're in one place
+
+- config.go
+	- loads in env files and app configs and stuff
+
+- main.go
+	- checks startup configs, everything exists...
+	- main data loop (starts the wal_manager loop)
+	- gives user a menu to choose actions from
+		- generate: start data generation
+		- restore: Trigger a Full Restore to Restore Target
+		- backup: Trigger a new Base Backup on Primary
+
+- wal_manager.go
+	- wal_manager struct updates the primary metadata table every few seconds by looking at the wal_archive folder data. it updates file sizes and general file info. that's all it does
+
+- backup_manager.go
+	- gets a snapshot of the wal data at a point in time. we save this as a backup to be used elsewhere
+
+- restore_manager.go
+	- snapshot the current db state and restore a new pg server to this state
+
+required files blocked by gitignore
+- docker_connection/
+	- primary/standby/restore_runner/wal_capture_service.env
+	- serviers.json (pg server info)
+	- docker-compose.yml
+- app.env
+
+
+How a restore actually works
+if the user selects "restore" in main.go, it will go to restore_manager.go. 
+1) there it snapshots the current state of the db to include the .partial file. we'll use this snapshot to restore a new pg server to.
+
+2) next, it wipes /var/lib/postgresql/data/* in the restore_target container, copies the base backup (not the step 1 snapshot) to that folder, and checks our permissions. if we haven't run backup yet, it can't do this
+
+3) configures the recovery mode of restore_target container. creates recovery.signal in "/var/lib/postgresql/data/recovery.signal" on the container (empty file that just tells it to enter recovery mode), now pg will look for the restore command to start restoring: the 1st echo gives that, the 2nd echo tells it to promote itself out of recovery mode and into a normal interactable pg server/container (read/write server).
+
+4) start the pg server in the container. its' already running but we're doing a new process. the containers default state should be "sleep infinity" so it's alive but not running pg. so we spawn a new pg process on it 
+
+- base backup: backup command in main(). a complete copy of the db files (base, global, pg_wal, ...) at a point in time. it's in /backups/latest
+- wal snapshot: restore command in main(). a copy of the single .partial wal file. saved in /wal_archive. 
+
 
 
 - dockerfile.wal_capture & sh script

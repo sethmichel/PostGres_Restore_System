@@ -7,18 +7,16 @@ import (
 	"math/rand"
 	"time"
 
-	"pg_restore/config"
-
 	"github.com/jackc/pgx/v5"
 )
 
-func main() {
+func DataGeneratorMain() {
 	// Seed the random number generator
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// Load Primary config
 	// Config loader will look in current or parent directory for "Docker_Connections"
-	primaryConfig, err := config.LoadDockerEnvConfig("Primary.env")
+	primaryConfig, err := LoadDockerEnvConfig("Primary.env")
 	if err != nil {
 		log.Fatalf("Failed to load Primary config: %v", err)
 	}

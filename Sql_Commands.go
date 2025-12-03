@@ -1,4 +1,4 @@
-package sql_commands
+package main
 
 func Create_Test_Data_Table() string {
 	return `
@@ -15,7 +15,7 @@ func Create_Wal_Metadata_Table() string {
 		CREATE TABLE IF NOT EXISTS wal_metadata (
 			file_name TEXT PRIMARY KEY,
 			timeline_id INTEGER,
-			lsn_start_hex TEXT,
+			segment_number TEXT,
 			is_partial BOOLEAN DEFAULT FALSE,
 			file_size_bytes BIGINT,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -26,12 +26,12 @@ func Create_Wal_Metadata_Table() string {
 
 func Update_Wal_MetaData_Table() string {
 	return `
-			INSERT INTO wal_metadata (file_name, timeline_id, lsn_start_hex, is_partial, file_size_bytes, processed)
+			INSERT INTO wal_metadata (file_name, timeline_id, segment_number, is_partial, file_size_bytes, processed)
 			VALUES ($1, $2, $3, $4, $5, FALSE)
 			ON CONFLICT (file_name) DO UPDATE 
 			SET is_partial = EXCLUDED.is_partial,
 			    file_size_bytes = EXCLUDED.file_size_bytes,
-                lsn_start_hex = EXCLUDED.lsn_start_hex
+                segment_number = EXCLUDED.segment_number
 			WHERE 
                 (wal_metadata.is_partial = TRUE AND EXCLUDED.is_partial = FALSE) 
                 OR 

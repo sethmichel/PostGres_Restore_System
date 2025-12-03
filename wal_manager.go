@@ -1,11 +1,10 @@
-package wal_manager
+package main
 
 import (
 	"context"
 	"fmt"
 	"log"
 	"os"
-	"pg_restore/sql_commands"
 	"strconv"
 	"strings"
 	"time"
@@ -71,7 +70,7 @@ func ParseWalFilename(filename string) (int, string, bool) {
 
 // scans the directory and updates the metadata table
 // Returns number of new/updated files
-// files ending in .partial are still being written to, we ignore those
+// files ending in .partial are still being written to, we take a snapshot of these
 func (wm *WalManager) SyncWalFiles() (int, error) {
 	entries, err := os.ReadDir(wm.ArchiveDir)
 	if err != nil {
@@ -108,7 +107,7 @@ func (wm *WalManager) SyncWalFiles() (int, error) {
 		size := info.Size()
 
 		// Upsert into DB
-		query := sql_commands.Update_Wal_MetaData_Table()
+		query := Update_Wal_MetaData_Table()
 
 		result, err := wm.DbConn.Exec(ctx, query, cleanName, timeline, segment, isPartial, size)
 		if err != nil {
@@ -124,6 +123,11 @@ func (wm *WalManager) SyncWalFiles() (int, error) {
 }
 
 // starts a ticker for every x seconds. it's not a stopwatch, it's a signal sender
+/*
+the loop detects that the .partial file has grown, and it updates the file_size_bytes in my database.
+When the file is eventually done (renamed), the loop detects is_partial changed from true to false and
+updates that status.
+*/
 func (wm *WalManager) RunMonitor(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
