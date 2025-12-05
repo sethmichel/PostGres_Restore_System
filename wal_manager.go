@@ -12,10 +12,16 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// WalManager handles scanning and cataloging WAL files
+// handles scanning and cataloging WAL files
 type WalManager struct {
 	ArchiveDir string
 	DbConn     *pgx.Conn
+}
+
+// holds file and LSN info
+type WalLsnInfo struct {
+	FileName string
+	StartLSN string
 }
 
 // creates & return a new manager
@@ -120,6 +126,60 @@ func (wm *WalManager) SyncWalFiles() (int, error) {
 	}
 
 	return updatedCount, nil
+}
+
+// returns a list of WAL files and their start LSNs
+func (wm *WalManager) GetAvailableLSNs() ([]WalLsnInfo, error) {
+	ctx := context.Background()
+	rows, err := wm.DbConn.Query(ctx, "SELECT file_name FROM wal_metadata ORDER BY file_name ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []WalLsnInfo
+	for rows.Next() {
+		var filename string
+		if err := rows.Scan(&filename); err != nil {
+			continue
+		}
+		lsn, err := CalculateLsnFromFilename(filename)
+		if err == nil {
+			results = append(results, WalLsnInfo{
+				FileName: filename,
+				StartLSN: lsn,
+			})
+		}
+	}
+	return results, nil
+}
+
+// computes the start LSN of a WAL segment
+func CalculateLsnFromFilename(filename string) (string, error) {
+	// Standard WAL file: 8 chars timeline + 16 chars segment = 24 chars
+	if len(filename) != 24 {
+		return "", fmt.Errorf("invalid filename length")
+	}
+	// skip timeline (first 8)
+	segmentHex := filename[8:] // 16 chars
+
+	// Parse as uint64
+	segVal, err := strconv.ParseUint(segmentHex, 16, 64)
+	if err != nil {
+		return "", err
+	}
+
+	logId := uint32(segVal >> 32)
+	segId := uint32(segVal & 0xFFFFFFFF)
+
+	// Calculate LSN
+	// LSN = (logId * 4GB) + (segId * 16MB)
+	// 4GB = 0x100000000
+	// 16MB = 0x1000000
+	lsn := (uint64(logId) * 0x100000000) + (uint64(segId) * 0x1000000)
+
+	// Format as X/Y (hex/hex)
+	return fmt.Sprintf("%X/%X", uint32(lsn>>32), uint32(lsn&0xFFFFFFFF)), nil
 }
 
 // starts a ticker for every x seconds. it's not a stopwatch, it's a signal sender

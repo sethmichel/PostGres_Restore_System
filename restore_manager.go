@@ -18,7 +18,7 @@ import (
 */
 
 // restore process controller
-func PerformRestore(restoreContainerName string, walArchiveDir string) error {
+func PerformRestore(restoreContainerName string, walArchiveDir string, targetLSN string) error {
 	fmt.Println("Starting Restore Process...")
 
 	// 0. Stop any running Postgres process in the restore_target container
@@ -39,7 +39,7 @@ func PerformRestore(restoreContainerName string, walArchiveDir string) error {
 	}
 
 	// 3. Configure Recovery settings
-	if err := ConfigureRecovery(restoreContainerName); err != nil {
+	if err := ConfigureRecovery(restoreContainerName, targetLSN); err != nil {
 		return fmt.Errorf("failed to configure recovery: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func PrepareDataDir(containerName string) error {
 }
 
 // Writes recovery.signal and postgresql.auto.conf
-func ConfigureRecovery(containerName string) error {
+func ConfigureRecovery(containerName string, targetLSN string) error {
 	fmt.Println("Configuring recovery parameters...")
 
 	// 1. Create recovery.signal
@@ -135,6 +135,11 @@ func ConfigureRecovery(containerName string) error {
 	configCmds := []string{
 		"echo \"restore_command = 'cp /wal_archive/%f %p'\" >> /var/lib/postgresql/data/postgresql.auto.conf",
 		"echo \"recovery_target_action = 'promote'\" >> /var/lib/postgresql/data/postgresql.auto.conf",
+	}
+
+	if targetLSN != "" {
+		configCmds = append(configCmds, fmt.Sprintf("echo \"recovery_target_lsn = '%s'\" >> /var/lib/postgresql/data/postgresql.auto.conf", targetLSN))
+		configCmds = append(configCmds, "echo \"recovery_target_inclusive = 'true'\" >> /var/lib/postgresql/data/postgresql.auto.conf")
 	}
 
 	// Executing those shell commands on the container

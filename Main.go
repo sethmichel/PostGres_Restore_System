@@ -219,10 +219,45 @@ func main() {
 		case "restore":
 			if do_we_have_backup {
 				fmt.Println("")
-				err := PerformRestore("restore_target", walArchiveDir)
-				if err != nil {
-					fmt.Printf("Restore Error: %v\n", err)
+				fmt.Println("Choose Restore Type:")
+				fmt.Println("1. Full Restore (Latest State)")
+				fmt.Println("2. Point-in-Time Recovery (LSN)")
+				// fmt.Println("3. Point-in-Time Recovery (Timestamp) - TODO")
+
+				fmt.Print("Enter choice (1 or 2): ")
+				var choice string
+				if scanner.Scan() {
+					choice = strings.TrimSpace(scanner.Text())
 				}
+
+				var targetLSN string
+				if choice == "2" {
+					// Show available LSNs
+					lsns, err := wm.GetAvailableLSNs()
+					if err != nil {
+						fmt.Printf("Error getting WAL LSNs: %v\n", err)
+					} else {
+						fmt.Println("\nAvailable WAL Segments and Start LSNs:")
+						for _, l := range lsns {
+							fmt.Printf("  %s -> Start LSN: %s\n", l.FileName, l.StartLSN)
+						}
+						fmt.Println("\nEnter target LSN (e.g., 0/1000000):")
+						fmt.Print("> ")
+						if scanner.Scan() {
+							targetLSN = strings.TrimSpace(scanner.Text())
+						}
+					}
+				}
+
+				if choice == "1" || (choice == "2" && targetLSN != "") {
+					err := PerformRestore("restore_target", walArchiveDir, targetLSN)
+					if err != nil {
+						fmt.Printf("Restore Error: %v\n", err)
+					}
+				} else {
+					fmt.Println("Invalid choice or empty LSN.")
+				}
+
 			} else {
 				fmt.Printf("Restore Error: you have to do at least 1 backup before restoring")
 			}
