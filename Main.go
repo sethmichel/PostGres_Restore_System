@@ -168,7 +168,7 @@ func CheckPhysicalReplicationSlots(dsn string) {
 
 func main() {
 	walArchiveDir := filepath.Join("Docker_Connections", "wal_archive")
-	do_we_have_backup := false
+	do_we_have_backup := CheckForExistingBackup()
 
 	// 1 load configs
 	primaryConfig, standbyConfig, walCaptureConfig, restoreTargetConfig, appConfig := LoadAllConfigs()
@@ -208,6 +208,7 @@ func main() {
 			fmt.Println("Data Generator started in background...")
 
 		case "backup":
+			fmt.Println("")
 			err := TriggerBaseBackup("pg_primary")
 			if err != nil {
 				fmt.Printf("Backup Error: %v\n", err)
@@ -216,7 +217,8 @@ func main() {
 			}
 
 		case "restore":
-			if (do_we_have_backup) {
+			if do_we_have_backup {
+				fmt.Println("")
 				err := PerformRestore("restore_target", walArchiveDir)
 				if err != nil {
 					fmt.Printf("Restore Error: %v\n", err)
@@ -226,11 +228,12 @@ func main() {
 			}
 
 		case "q", "quit", "exit":
+			fmt.Println("")
 			fmt.Println("Shutting down...")
 			return
 
 		default:
-			fmt.Println("Unknown command. Available: backup, restore, q")
+			fmt.Printf("Unknown command: %q. Available: backup, restore, q\n", input)
 		}
 	}
 }

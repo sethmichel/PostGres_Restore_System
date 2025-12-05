@@ -166,10 +166,16 @@ func StartPostgres(containerName string) error {
 	fmt.Println("Starting Postgres...")
 	// We use -d to run in detached mode
 	// We run the 'postgres' command.
-	// Note: The container is already running (sleep infinity). We are spawning a new process.
-	// We have already ensured no other postgres is running via StopPostgres.
-
-	cmd := exec.Command("docker", "exec", "-d", containerName, "docker-entrypoint.sh", "postgres")
+	// We MUST match the Primary's configuration (especially max_connections=200)
+	// or the restore will fail with "insufficient parameter settings"
+	cmd := exec.Command("docker", "exec", "-d", containerName, "docker-entrypoint.sh", "postgres",
+		"-c", "wal_level=replica",
+		"-c", "max_wal_senders=10",
+		"-c", "max_replication_slots=5",
+		"-c", "max_connections=200",
+		"-c", "archive_mode=off",
+		"-c", "listen_addresses=*",
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to start postgres: %s: %w", string(out), err)
 	}

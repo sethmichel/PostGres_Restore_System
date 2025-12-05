@@ -119,18 +119,21 @@ required files blocked by gitignore
 
 
 How a restore actually works
-if the user selects "restore" in main.go, it will go to restore_manager.go. 
-1) there it snapshots the current state of the db to include the .partial file. we'll use this snapshot to restore a new pg server to.
+	if the user selects "restore" in main.go, it will go to restore_manager.go. 
+	1) there it snapshots the current state of the db to include the .partial file. we'll use this snapshot to restore a new pg server to.
 
-2) next, it wipes /var/lib/postgresql/data/* in the restore_target container, copies the base backup (not the step 1 snapshot) to that folder, and checks our permissions. if we haven't run backup yet, it can't do this
+	2) next, it wipes /var/lib/postgresql/data/* in the restore_target container, copies the base backup (not the step 1 snapshot) to that folder, and checks our permissions. if we haven't run backup yet, it can't do this
 
-3) configures the recovery mode of restore_target container. creates recovery.signal in "/var/lib/postgresql/data/recovery.signal" on the container (empty file that just tells it to enter recovery mode), now pg will look for the restore command to start restoring: the 1st echo gives that, the 2nd echo tells it to promote itself out of recovery mode and into a normal interactable pg server/container (read/write server).
+	3) configures the recovery mode of restore_target container. creates recovery.signal in "/var/lib/postgresql/data/recovery.signal" on the container (empty file that just tells it to enter recovery mode), now pg will look for the restore command to start restoring: the 1st echo gives that, the 2nd echo tells it to promote itself out of recovery mode and into a normal interactable pg server/container (read/write server).
 
-4) start the pg server in the container. its' already running but we're doing a new process. the containers default state should be "sleep infinity" so it's alive but not running pg. so we spawn a new pg process on it 
+	4) start the pg server in the container. its' already running but we're doing a new process. the containers default state should be "sleep infinity" so it's alive but not running pg. so we spawn a new pg process on it 
 
-- base backup: backup command in main(). a complete copy of the db files (base, global, pg_wal, ...) at a point in time. it's in /backups/latest
-- wal snapshot: restore command in main(). a copy of the single .partial wal file. saved in /wal_archive. 
+	- base backup: backup command in main(). a complete copy of the db files (base, global, pg_wal, ...) at a point in time. it's in /backups/latest
+	- wal snapshot: restore command in main(). a copy of the single .partial wal file. saved in /wal_archive. 
 
+	Keep in mind that since the pg server in estore_target is inactive until a restore, we can see in pgadmin, but it'll be disconnected. it should be fully useable the same ways as primary after a restore - however doing it this way also makes it inherite the credentials of primary. so the username/pw of it are the same as primary. this also means it needs the same settings
+
+------------------------------
 
 
 - dockerfile.wal_capture & sh script
@@ -287,10 +290,10 @@ after it's done add this test
 
 
 
-**Required private local files not in this repo**
+**Required private local files not in this repo & misc required changes**
 - primary, standby, app, restore_runner, wal_capture_service env files, which are the config files
 - servers.json which has the info to make the pg servers
 - docker-compose.yml file
 - docker_connections/wal_archive/ directory
-
+- my version of go writes to the debug console which is read only. you'll need to tell the debugger to run inside the terminal instead
 

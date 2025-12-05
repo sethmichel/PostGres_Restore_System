@@ -5,6 +5,7 @@ Docker_Connections/Sink.env
 Docker_Connections/docker-compose.yml
 Docker_Connections/servers.json
 Docker_Connections/Wal_Archive/
+Docker_Connections/backups/
 app.env
 Sqlite/Lsn_Offsets.Sqlite
 password_issue.txt

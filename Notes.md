@@ -47,9 +47,13 @@ FIXED: the extractor container keeps exiting on launch. maybe since there's noth
 	- the sh script was using "--create-slot" this might be making the slot and then exiting. maybe it's not combined with the streaming mode correctly
 	- fix: create the slow separatly, ignore the error if it already exists, then run the loop
 
-nothing being written to wal_archive
+FIXED: nothing being written to wal_archive
 	- might be primary is trying to archive data (archive_mode=on) while the service is trying to access the same dir, so they're fighting for access. 
 	- OR things are ending in crlf line endings. so we can add a line to dockerfile.wal_captureer to covert these
+
+IGNORING: Since this is a physical restore, the restored server will inherit the same credentials as the Primary (User: primary_user, Pass: primary_pw), effectively ignoring the POSTGRES_USER variables in Restore_Runner.env.
+
+
 
 **weird things I've seen**
 - multiple raw wal files can have the same timeline id. the timeline id is the first 8 chars, so hundreds of thousands will have the same id (1) until a failure or restore event makes a new timeline (2). the 16 chars after that is the unique sequence number of the file in that timeline (segment_number)

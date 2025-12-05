@@ -44,7 +44,10 @@ func DataGeneratorMain() {
 		if err != nil {
 			log.Printf("Error inserting row %d: %v", counter, err)
 		} else {
-			fmt.Printf("Inserted row: %d | %s | %.2f\n", counter, msg, val)
+			// Only log every 10 rows to reduce noise
+			if counter % 10 == 0 {
+				log.Printf("Generated %d rows...", counter)
+			}
 		}
 
 		counter++
